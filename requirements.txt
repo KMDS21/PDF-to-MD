@@ -1,6 +1,5 @@
 # --- Core conversion engines ---
-PyMuPDF>=1.24.0          # PDF text/layout/image extraction
-pdfplumber>=0.11.0       # PDF table extraction
+PyMuPDF>=1.24.0          # PDF text/layout/image/table extraction
 python-pptx>=0.6.23      # PowerPoint parsing
 python-docx>=1.1.0       # Word parsing
 openpyxl>=3.1.0          # Excel parsing

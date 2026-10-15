@@ -156,6 +156,11 @@ def convert_folder(
     options = options or ConversionOptions()
 
     files = find_files(input_root, recursive=options.recursive)
+    # never re-convert our own output (e.g. when output lives inside input)
+    try:
+        files = [f for f in files if output_root not in f.resolve().parents]
+    except OSError:
+        pass
     total = len(files)
     results: list[FileResult] = []
     if log_cb:
