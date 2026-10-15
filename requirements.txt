@@ -1,0 +1,16 @@
+# --- Core conversion engines ---
+PyMuPDF>=1.24.0          # PDF text/layout/image extraction
+pdfplumber>=0.11.0       # PDF table extraction
+python-pptx>=0.6.23      # PowerPoint parsing
+python-docx>=1.1.0       # Word parsing
+openpyxl>=3.1.0          # Excel parsing
+Pillow>=10.0.0           # Image handling
+
+# --- OCR (optional; also needs Tesseract-OCR installed system-wide) ---
+pytesseract>=0.3.10
+
+# --- GUI ---
+customtkinter>=5.2.0
+
+# --- HTTP (used by optional AI enhancement) ---
+requests>=2.31.0
