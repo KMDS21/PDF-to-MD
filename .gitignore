@@ -27,7 +27,7 @@ Thumbs.db
 # Conversion output
 output/
 tests/output/
-tests/samples/out/
+tests/samples/out*/
 tests/samples/*_assets/
 
 # Logs
