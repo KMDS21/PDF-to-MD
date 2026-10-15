@@ -13,12 +13,13 @@ import argparse
 import importlib
 import sys
 from dataclasses import asdict, dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from threading import Event
 from typing import Callable, Optional
 
 from app.engines.base import ConversionEngine
-from app.utils import build_front_matter
+from app.utils import build_front_matter, sanitize_filename
 
 # extension -> (module, class) — imported lazily so a missing optional
 # dependency never breaks the whole app
@@ -42,6 +43,16 @@ SUPPORTED_EXTENSIONS: tuple[str, ...] = tuple(_ENGINE_MAP)
 #: Directories never worth scanning
 _SKIP_DIRS = {"__pycache__", ".git", ".venv", "venv", "env", "node_modules"}
 
+
+def _is_skippable(relative_parts: tuple[str, ...]) -> bool:
+    """Skip hidden/system dirs, virtualenvs and our own extracted-asset folders."""
+    for part in relative_parts:
+        if part in _SKIP_DIRS or part.startswith("."):
+            return True
+        if part.endswith("_assets"):  # folders created by earlier conversions
+            return True
+    return False
+
 _engine_cache: dict[str, ConversionEngine] = {}
 
 
@@ -57,6 +68,7 @@ class ConversionOptions:
     ai_provider: str = ""        # "openai" or "gemini"
     ai_api_key: str = ""
     ai_model: str = ""           # empty → provider default
+    merge_all: bool = False      # combine every file into ONE markdown book
 
 
 @dataclass
@@ -98,43 +110,71 @@ def find_files(root: Path, recursive: bool = True) -> list[Path]:
         p for p in pattern
         if p.is_file()
         and p.suffix.lower() in SUPPORTED_EXTENSIONS
-        and not any(part in _SKIP_DIRS or part.startswith(".") for part in p.relative_to(root).parts)
+        and not _is_skippable(p.relative_to(root).parts)
     ]
     return sorted(files)
 
 
-def convert_file(source: Path, input_root: Path, output_root: Path,
-                 options: ConversionOptions) -> FileResult:
-    """Convert a single file, writing the .md (and assets) under `output_root`."""
+def _convert_one(source: Path, input_root: Path, output_root: Path,
+                 options: ConversionOptions,
+                 forced_output_md: Optional[Path] = None,
+                 output_stem: Optional[str] = None) -> tuple[FileResult, str, str]:
+    """Convert one file without writing the final .md.
+
+    Returns (FileResult, front_matter, markdown_body). Assets are written next
+    to `forced_output_md` when given (merge mode: one shared asset folder),
+    otherwise next to the file's own .md path. `output_stem` overrides the
+    default <source stem> used for the .md name (collision handling).
+    """
     source = Path(source)
     engine = get_engine(source.suffix)
     if engine is None:
         return FileResult(source, None, False,
-                          f"Engine for '{source.suffix}' is unavailable (not installed)")
+                          f"Engine for '{source.suffix}' is unavailable (not installed)"), "", ""
 
     try:
         rel_source = source.relative_to(input_root)
     except ValueError:
         rel_source = Path(source.name)
 
-    out_path = Path(output_root) / rel_source.parent / f"{source.stem}.md"
+    if forced_output_md is not None:
+        out_path = Path(forced_output_md)
+    else:
+        out_path = Path(output_root) / rel_source.parent / f"{output_stem or source.stem}.md"
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
     try:
         result = engine.convert(source, out_path, asdict(options))
     except Exception as exc:  # engines should catch internally; this is the safety net
-        return FileResult(source, None, False, f"{type(exc).__name__}: {exc}")
+        return FileResult(source, None, False, f"{type(exc).__name__}: {exc}"), "", ""
 
     if not result.success:
-        return FileResult(source, None, False, result.error or "Conversion failed", result.warnings)
+        return (FileResult(source, None, False, result.error or "Conversion failed",
+                           result.warnings), "", "")
 
+    front_matter = build_front_matter(rel_source, engine.name, result.metadata)
+    return FileResult(source, out_path, True, "OK", result.warnings), front_matter, result.markdown
+
+
+def convert_file(source: Path, input_root: Path, output_root: Path,
+                 options: ConversionOptions,
+                 output_stem: Optional[str] = None) -> FileResult:
+    """Convert a single file, writing the .md (and assets) under `output_root`."""
+    result, front_matter, markdown = _convert_one(source, input_root, output_root, options,
+                                                  output_stem=output_stem)
+    if not result.success or result.output is None:
+        return result
     try:
-        front_matter = build_front_matter(rel_source, engine.name, result.metadata)
-        out_path.write_text(front_matter + result.markdown, encoding="utf-8")
+        result.output.write_text(front_matter + markdown, encoding="utf-8")
     except OSError as exc:
         return FileResult(source, None, False, f"Could not write output: {exc}", result.warnings)
+    return result
 
-    return FileResult(source, out_path, True, "OK", result.warnings)
+
+def _section_header(rel_source: Path, engine_name: str) -> str:
+    """Divider + source banner used between files in merged (book) mode."""
+    return (f"\n\n---\n\n**📄 Source: `{rel_source.as_posix()}`**  \n"
+            f"*Converted by {engine_name}*\n\n")
 
 
 def convert_folder(
@@ -150,6 +190,8 @@ def convert_folder(
     :param progress_cb: called as (done, total, current_file) before each file
     :param cancel_event: set this Event to stop after the current file
     :param log_cb:      receives human-readable status lines
+    :param options.merge_all: combine ALL files into one `<folder>.md` book,
+                              each source separated by a divider + source banner
     """
     input_root = Path(input_root).resolve()
     output_root = Path(output_root).resolve()
@@ -164,7 +206,33 @@ def convert_folder(
     total = len(files)
     results: list[FileResult] = []
     if log_cb:
-        log_cb(f"Found {total} convertible file(s) in {input_root}")
+        mode = "merged book" if options.merge_all else "separate files"
+        log_cb(f"Found {total} convertible file(s) in {input_root} → mode: {mode}")
+
+    # collision handling: same stem in the same folder (e.g. notes.pdf + notes.pptx)
+    # → later files keep their extension in the output name (notes.pptx.md)
+    stem_owners: dict[tuple[str, str], Path] = {}
+    output_stems: dict[Path, str] = {}
+    for source in files:
+        try:
+            rel_parent = source.relative_to(input_root).parent.as_posix().lower()
+        except ValueError:
+            rel_parent = ""
+        key = (rel_parent, source.stem.lower())
+        if key in stem_owners:
+            output_stems[source] = f"{source.stem}.{source.suffix.lstrip('.').lower()}"
+        else:
+            stem_owners[key] = source
+            output_stems[source] = source.stem
+
+    # merge mode: every engine writes assets into the book's shared asset folder
+    book_path: Optional[Path] = None
+    book_sections: list[str] = []
+    if options.merge_all and total:
+        book_name = sanitize_filename(input_root.name if input_root.is_dir()
+                                      else input_root.stem) + ".md"
+        book_path = output_root / book_name
+        book_path.parent.mkdir(parents=True, exist_ok=True)
 
     for index, source in enumerate(files, 1):
         if cancel_event is not None and cancel_event.is_set():
@@ -173,13 +241,55 @@ def convert_folder(
             break
         if progress_cb:
             progress_cb(index, total, source)
-        result = convert_file(source, input_root, output_root, options)
-        results.append(result)
+
+        if options.merge_all and book_path is not None:
+            # all engines derive their asset folder from the output md path,
+            # so passing the book path gives every file one shared assets folder
+            try:
+                rel = source.relative_to(input_root)
+            except ValueError:
+                rel = Path(source.name)
+            result, _front, body = _convert_one(source, input_root, book_path.parent, options,
+                                                forced_output_md=book_path)
+            if result.success:
+                engine = get_engine(source.suffix)
+                book_sections.append(_section_header(rel, engine.name if engine else "?") + body.strip())
+                result = FileResult(source, book_path, True, "OK (merged)", result.warnings)
+            results.append(result)
+        else:
+            result = convert_file(source, input_root, output_root, options,
+                                  output_stem=output_stems.get(source))
+            results.append(result)
+
         if log_cb:
-            mark = "✓" if result.success else "✗"
-            log_cb(f"[{index}/{total}] {mark} {source.name} — {result.message}")
-            for warning in result.warnings:
+            last = results[-1]
+            mark = "✓" if last.success else "✗"
+            log_cb(f"[{index}/{total}] {mark} {source.name} — {last.message}")
+            for warning in last.warnings:
                 log_cb(f"    ⚠ {warning}")
+
+    # assemble the merged book
+    if options.merge_all and book_path is not None and book_sections:
+        ok_sources = [r.source for r in results if r.success]
+        front = "---\n"
+        front += f'title: "{sanitize_filename(input_root.name if input_root.is_dir() else input_root.stem)}"\n'
+        front += "converter: PDF-to-MD\n"
+        front += f"sources: {len(ok_sources)}\n"
+        front += f"converted: {datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')}\n"
+        front += "---\n"
+        heading = f"# 📚 {sanitize_filename(input_root.name if input_root.is_dir() else input_root.stem)}\n\n"
+        heading += (f"*Combined conversion of {len(ok_sources)} file(s). "
+                    f"Each source starts after a horizontal rule.*\n")
+        try:
+            book_path.write_text(front + "\n" + heading + "".join(book_sections) + "\n",
+                                 encoding="utf-8")
+            if log_cb:
+                log_cb(f"📖 Merged book written → {book_path}")
+        except OSError as exc:
+            for r in results:
+                if r.output == book_path:
+                    r.success = False
+                    r.message = f"Could not write merged book: {exc}"
 
     if progress_cb:
         progress_cb(len(results), total, Path(""))
@@ -208,6 +318,8 @@ def _cli(argv: Optional[list[str]] = None) -> int:
     parser.add_argument("--no-images", action="store_true", help="skip image extraction")
     parser.add_argument("--no-notes", action="store_true", help="skip PPTX speaker notes")
     parser.add_argument("--no-ocr", action="store_true", help="disable OCR for scanned pages")
+    parser.add_argument("--merge", action="store_true",
+                        help="combine ALL files into one <folder>.md book")
     args = parser.parse_args(argv)
 
     input_path = Path(args.input).expanduser().resolve()
@@ -222,6 +334,7 @@ def _cli(argv: Optional[list[str]] = None) -> int:
         extract_images=not args.no_images,
         include_speaker_notes=not args.no_notes,
         ocr_enabled=not args.no_ocr,
+        merge_all=args.merge,
     )
     results = convert_folder(input_path, output_path, options, log_cb=print)
     ok = sum(1 for r in results if r.success)

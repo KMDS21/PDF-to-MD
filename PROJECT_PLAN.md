@@ -35,6 +35,8 @@ presentations, Word docs, Excel sheets and scanned images.
 | R6 | Offline conversion engine with optional AI enhancement | Plan review |
 | R7 | Progress display, per-file status, cancel, open-output button | Plan review |
 | R8 | Output mirrors input folder structure | Plan review |
+| R9 | Option to merge ALL files into one book .md, each source separated (user request) | User |
+| R10 | Creative, easy-to-understand UI (cards, mode switch, live status) | User |
 
 ---
 
@@ -87,12 +89,13 @@ Markdown string + assets on disk → written to `output/<mirrored path>/<name>.m
 
 | # | Milestone | Commit content | Status |
 |---|-----------|----------------|--------|
-| M1 | Scaffold | git init, requirements, .gitignore, README skeleton, main.py stub, this plan | ⏳ |
-| M2 | Core orchestrator | `converter.py`, `utils.py`, `engines/base.py` | ⏳ |
-| M3 | PDF engine | `pdf_engine.py` — text, tables, images, equations, OCR fallback | ⏳ |
-| M4 | PPTX engine | `pptx_engine.py` — slides, notes, tables, images, equations | ⏳ |
-| M5 | DOCX/XLSX/image engines | `docx_engine.py`, `xlsx_engine.py`, `image_engine.py` | ⏳ |
-| M6 | GUI | `gui.py` — folder picker, options panel, progress, log, open-output | ⏳ |
+| M1 | Scaffold | git init, requirements, .gitignore, README skeleton, main.py stub, this plan | ✅ |
+| M2 | Core orchestrator | `converter.py`, `utils.py`, `engines/base.py` | ✅ |
+| M3 | PDF engine | `pdf_engine.py` — text, tables, images, equations, OCR fallback | ✅ |
+| M4 | PPTX engine | `pptx_engine.py` — slides, notes, tables, images, equations | ✅ |
+| M5 | DOCX/XLSX/image engines | `docx_engine.py`, `xlsx_engine.py`, `image_engine.py` | ✅ |
+| M6 | GUI | `gui.py` — card-based creative UI, folder picker, merge-mode switch, progress, log | ✅ |
+| M6+ | Merge mode | all files → one book .md with per-source dividers + shared assets (user request) | ✅ |
 | M7 | AI enhancement | `ai_helper.py` — optional OpenAI/Gemini upgrades | ⏳ |
 | M8 | Docs & release | Full README, sample tests, push to GitHub | ⏳ |
 
@@ -129,14 +132,15 @@ Markdown string + assets on disk → written to `output/<mirrored path>/<name>.m
 
 | Control | Behavior |
 |---------|----------|
-| **Select Folder…** | Opens folder dialog; lists found convertible files |
+| **Select Folder…** | Opens folder dialog; lists found convertible files + count badge |
 | Recursive scan toggle | Include subfolders (default: on) |
 | Output folder picker | Defaults to `<input>/output` |
+| **Output mode switch** | 📄 Separate files (one .md each, mirrored structure) **or** 📚 Merge into one book (`<folder>.md` with `---` dividers + shared assets folder) |
 | Options | Extract images · Speaker notes · OCR scanned pages · AI enhancement |
 | AI settings | Provider (OpenAI/Gemini), API key field (stored in memory only) |
 | **Convert** button | Starts batch; **Cancel** stops after current file |
-| Progress bar + status list | Per-file ✓ / ✗ with reason; live log pane |
-| **Open Output Folder** | Explorer window at output dir |
+| Progress bar + % + status | Per-file ✓ / ✗ / ⚠ in live log pane; final "Done: n/m" |
+| **Open Output** | Windows Explorer at output dir |
 
 ---
 
