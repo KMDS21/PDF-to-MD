@@ -37,6 +37,8 @@ presentations, Word docs, Excel sheets and scanned images.
 | R8 | Output mirrors input folder structure | Plan review |
 | R9 | Option to merge ALL files into one book .md, each source separated (user request) | User |
 | R10 | Creative, easy-to-understand UI (cards, mode switch, live status) | User |
+| R11 | "New Conversion" button — reset UI for the next batch without restarting the app | User |
+| R12 | Persistent dated activity log file with all conversion details | User |
 
 ---
 
@@ -96,6 +98,7 @@ Markdown string + assets on disk → written to `output/<mirrored path>/<name>.m
 | M5 | DOCX/XLSX/image engines | `docx_engine.py`, `xlsx_engine.py`, `image_engine.py` | ✅ |
 | M6 | GUI | `gui.py` — card-based creative UI, folder picker, merge-mode switch, progress, log | ✅ |
 | M6+ | Merge mode | all files → one book .md with per-source dividers + shared assets (user request) | ✅ |
+| M6++ | Session reset + activity log | 🔄 New Conversion reset button; dated `logs/conversion_YYYY-MM-DD.log` with per-file timing/warnings/session summaries (user request) | ✅ |
 | M7 | AI enhancement | `ai_helper.py` — optional OpenAI/Gemini upgrades | ⏳ |
 | M8 | Docs & release | Full README, sample tests, push to GitHub | ⏳ |
 

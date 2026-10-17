@@ -205,7 +205,7 @@ class App(ctk.CTk):
     def _build_actions_row(self) -> None:
         bar = ctk.CTkFrame(self, fg_color="transparent")
         bar.grid(row=4, column=0, sticky="new", padx=14, pady=6)
-        bar.grid_columnconfigure(4, weight=1)
+        bar.grid_columnconfigure(5, weight=1)
 
         self.convert_btn = ctk.CTkButton(
             bar, text="🔃  Convert", width=150, height=40, corner_radius=12,
@@ -224,17 +224,29 @@ class App(ctk.CTk):
                                       state="disabled", command=self._open_output)
         self.open_btn.grid(row=0, column=2, padx=4)
 
+        self.log_btn = ctk.CTkButton(bar, text="📜 Log", width=80, height=40,
+                                     fg_color="gray25", hover_color="gray30",
+                                     command=self._open_log_file)
+        self.log_btn.grid(row=0, column=3, padx=4)
+
+        self.new_btn = ctk.CTkButton(bar, text="🔄 New Conversion", width=150, height=40,
+                                     corner_radius=12, state="disabled",
+                                     fg_color=ACCENT, hover_color="#2d7ab8",
+                                     font=ctk.CTkFont(size=14, weight="bold"),
+                                     command=self._reset_for_next)
+        self.new_btn.grid(row=0, column=4, padx=(8, 0))
+
         self.progress = ctk.CTkProgressBar(bar, height=14, corner_radius=7)
-        self.progress.grid(row=0, column=4, sticky="ew", padx=14)
+        self.progress.grid(row=0, column=5, sticky="ew", padx=14)
         self.progress.set(0)
 
         self.percent_label = ctk.CTkLabel(bar, text="0%", width=48,
                                           font=ctk.CTkFont(size=14, weight="bold"))
-        self.percent_label.grid(row=0, column=5)
+        self.percent_label.grid(row=0, column=6)
 
         self.status_label = ctk.CTkLabel(bar, text="Ready", anchor="w", text_color="gray55",
                                          font=ctk.CTkFont(size=12))
-        self.status_label.grid(row=1, column=0, columnspan=6, sticky="w", pady=(4, 0))
+        self.status_label.grid(row=1, column=0, columnspan=7, sticky="w", pady=(4, 0))
 
     # --- 6. log ----------------------------------------------------------
     def _build_log(self) -> None:
@@ -304,6 +316,7 @@ class App(ctk.CTk):
         self.convert_btn.configure(state="disabled")
         self.cancel_btn.configure(state="normal")
         self.open_btn.configure(state="disabled")
+        self.new_btn.configure(state="disabled")
         self.progress.set(0)
         self.percent_label.configure(text="0%")
         mode_text = "merged book" if self.merge_mode else "separate files"
@@ -337,6 +350,43 @@ class App(ctk.CTk):
         if self.output_dir and self.output_dir.exists():
             os.startfile(self.output_dir)  # Windows Explorer
 
+    def _open_log_file(self) -> None:
+        """Open today's persistent activity log in the default text editor."""
+        from app import activity_log
+        path = activity_log.today_log_path()
+        if not path.exists():
+            messagebox.showinfo("No log yet",
+                                "The activity log will be created after your first conversion.")
+            return
+        os.startfile(path)
+
+    def _reset_for_next(self) -> None:
+        """Clear everything so the next batch can start without restarting the app."""
+        # keep the selected folders (users usually convert another folder next),
+        # but wipe all run state and messages
+        self.cancel_event.clear()
+        self.progress.set(0)
+        self.percent_label.configure(text="0%")
+        self.status_label.configure(text="Ready")
+        self.convert_btn.configure(state="normal")
+        self.cancel_btn.configure(state="disabled")
+        self.open_btn.configure(state="disabled")
+        self.new_btn.configure(state="disabled")
+        # drain any stale queue messages from the previous run
+        for queue in (self.log_queue, self.progress_queue):
+            while True:
+                try:
+                    queue.get_nowait()
+                except Empty:
+                    break
+        # clear the log pane
+        self.log.configure(state="normal")
+        self.log.delete("1.0", "end")
+        self.log.configure(state="disabled")
+        self._log("Ready for the next conversion — press 🔃 Convert when you're set.")
+        if self.input_dir is not None:
+            self._refresh_file_count()
+
     # ------------------------------------------------------------ polling
     def _poll_queues(self) -> None:
         # drain progress first so the final DONE status (log queue) always wins
@@ -369,6 +419,7 @@ class App(ctk.CTk):
                 out_dir: Path | None = None, failed: bool = False) -> None:
         self.convert_btn.configure(state="normal")
         self.cancel_btn.configure(state="disabled")
+        self.new_btn.configure(state="normal")
         if out_dir:
             self.output_dir = out_dir
             self.open_btn.configure(state="normal")
@@ -379,6 +430,9 @@ class App(ctk.CTk):
             self.percent_label.configure(text="100%" if total else "0%")
             self.status_label.configure(text=f"✅ Done: {ok}/{total} converted")
             self._log(f"All done — {ok}/{total} file(s) converted → {self.output_dir}")
+            from app import activity_log
+            self._log(f"📜 Full details saved to: {activity_log.today_log_path()}")
+            self._log("Press 🔄 New Conversion to clear the screen for the next batch.")
 
     # ---------------------------------------------------------------- misc
     def _log(self, line: str) -> None:
