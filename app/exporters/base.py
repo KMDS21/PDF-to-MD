@@ -41,9 +41,10 @@ class Exporter(ABC):
     def resolve_image(src: str, base_dir: Path) -> Path | None:
         """Resolve an image reference against the .md file's directory.
 
-        Handles absolute paths, relative paths, spaces and URL encoding.
-        Returns None when the file does not exist (the caller logs a warning
-        and the export continues — content must never be lost silently).
+        Handles absolute paths, relative paths, spaces and URL encoding
+        (including ``file:///C:/...`` links). Returns None when the file does
+        not exist — the caller logs a warning and the export continues, so no
+        content is ever lost silently.
         """
         if not src:
             return None
@@ -51,11 +52,23 @@ class Exporter(ABC):
 
         if src.startswith(("http://", "https://", "data:")):
             return None  # remote/inline images are not fetched (offline app)
+
         parsed = urlparse(src)
-        candidate = Path(unquote(parsed.path if parsed.scheme == "file" else src))
-        if not candidate.is_absolute():
-            candidate = base_dir / candidate
-        try:
-            return candidate if candidate.is_file() else None
-        except OSError:
-            return None
+        # markdown escapes spaces in destinations — decode, with the literal
+        # reference kept as a fallback for files that really contain '%'
+        raw = unquote(parsed.path) if parsed.scheme == "file" else unquote(src)
+        # windows file URLs arrive as /C:/dir/file.png — drop the leading slash
+        if len(raw) > 3 and raw[0] == "/" and raw[2] == ":" and raw[1].isalpha():
+            raw = raw[1:]
+
+        # try the URL-decoded form first, then the literal reference
+        for candidate_src in dict.fromkeys((raw, src)):
+            candidate = Path(candidate_src)
+            if not candidate.is_absolute():
+                candidate = base_dir / candidate_src
+            try:
+                if candidate.is_file():
+                    return candidate
+            except OSError:
+                continue
+        return None
