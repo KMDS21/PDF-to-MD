@@ -53,14 +53,13 @@ class DocxExporter(Exporter):
                     level = min(6, max(1, block.level))
                     document.add_heading(block.text or " ", level=level)
                 elif isinstance(block, md_blocks.Paragraph):
-                    self._paragraph(document, block.runs, base_dir, warnings)
+                    images += self._paragraph(document, block.runs, base_dir, warnings)
                 elif isinstance(block, md_blocks.ListBlock):
                     for item in block.items:
                         style = "List Number" if item.ordered else "List Bullet"
                         paragraph = document.add_paragraph(style=style)
                         paragraph.paragraph_format.left_indent = Inches(0.25 * (item.level + 1))
-                        self._runs(paragraph, item.runs, base_dir, warnings)
-                        images += sum(1 for r in item.runs if r.image)
+                        images += self._runs(paragraph, item.runs, base_dir, warnings)
                 elif isinstance(block, md_blocks.TableBlock):
                     self._table(document, block)
                 elif isinstance(block, md_blocks.CodeBlock):
@@ -72,7 +71,12 @@ class DocxExporter(Exporter):
                         except KeyError:
                             paragraph = document.add_paragraph()
                             paragraph.runs  # noqa: B018 - ensure list exists
-                        paragraph.add_run(quote_para.text).italic = True
+                        if any(r.image for r in quote_para.runs):
+                            # keep inline pictures rather than flattening them away
+                            images += self._runs(paragraph, quote_para.runs,
+                                                 base_dir, warnings)
+                        else:
+                            paragraph.add_run(quote_para.text).italic = True
                 elif isinstance(block, md_blocks.ImageBlock):
                     images += self._image(document, block, base_dir, warnings)
                 elif isinstance(block, md_blocks.RuleBlock):
@@ -86,19 +90,21 @@ class DocxExporter(Exporter):
 
     # ------------------------------------------------------------ pieces
     def _paragraph(self, document: Any, runs: list[md_blocks.Run], base_dir: Path,
-                   warnings: list[str]) -> None:
+                   warnings: list[str]) -> int:
         if not runs:
             document.add_paragraph("")
-            return
+            return 0
         paragraph = document.add_paragraph()
-        self._runs(paragraph, runs, base_dir, warnings)
+        return self._runs(paragraph, runs, base_dir, warnings)
 
     def _runs(self, paragraph: Any, runs: list[md_blocks.Run], base_dir: Path,
-              warnings: list[str]) -> None:
+              warnings: list[str]) -> int:
+        placed = 0
         for run in runs:
             if run.image and run.href:
                 if self._add_picture(paragraph, run.href, base_dir, warnings,
                                      width=_MAX_IMAGE_WIDTH):
+                    placed += 1
                     paragraph.add_run(" ")  # breathing room after inline image
                 continue
             text = run.text
@@ -113,6 +119,7 @@ class DocxExporter(Exporter):
             if run.code:
                 new_run.font.name = "Consolas"
                 new_run.font.size = Pt(9.5)
+        return placed
 
     def _image(self, document: Any, block: md_blocks.ImageBlock, base_dir: Path,
                warnings: list[str]) -> int:
