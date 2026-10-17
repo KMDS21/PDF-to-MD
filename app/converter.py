@@ -208,10 +208,11 @@ def convert_folder(
     total = len(files)
     results: list[FileResult] = []
     session_started = datetime.now(timezone.utc)
-    activity_log.write(
-        f"SESSION START | input: {input_root} | output: {output_root} | "
-        f"files found: {total} | {activity_log.format_options(options)}",
-        header=True)
+    activity_log.write(header=True)
+    activity_log.write(f"**Input:** `{input_root}`")
+    activity_log.write(f"**Output:** `{output_root}`")
+    activity_log.write(f"**Files found:** {total} — {activity_log.format_options(options)}")
+    activity_log.write_table_header()
     if log_cb:
         mode = "merged book" if options.merge_all else "separate files"
         log_cb(f"Found {total} convertible file(s) in {input_root} → mode: {mode}")
@@ -245,7 +246,7 @@ def convert_folder(
         if cancel_event is not None and cancel_event.is_set():
             if log_cb:
                 log_cb("Conversion cancelled by user.")
-            activity_log.write(f"SESSION CANCELLED by user after {len(results)} file(s)")
+            activity_log.write(f"⛔ **Cancelled** by user after {len(results)} file(s)")
             break
         if progress_cb:
             progress_cb(index, total, source)
@@ -272,18 +273,19 @@ def convert_folder(
 
         elapsed = time.perf_counter() - file_started
         last = results[-1]
-        mark = "✓" if last.success else "✗"
-        # persistent log: full relative path, size, outcome, duration
+        mark = "✅" if last.success else "❌"
         try:
             size_kb = source.stat().st_size / 1024
         except OSError:
             size_kb = 0.0
-        activity_log.write(
-            f"FILE {mark} {source.name} ({size_kb:.0f} KB, {elapsed:.2f}s) — {last.message}")
-        for warning in last.warnings:
-            activity_log.write(f"    WARNING: {warning}")
+        details = last.message
+        if last.warnings:
+            details += " · " + " · ".join(w.replace("|", "\\|") for w in last.warnings)
+        activity_log.write_row(f"`{source.name}`", f"{size_kb:.0f} KB",
+                               f"{elapsed:.2f}s", mark, details.replace("|", "\\|"))
         if log_cb:
-            log_cb(f"[{index}/{total}] {mark} {source.name} — {last.message}")
+            log_cb(f"[{index}/{total}] {'✓' if last.success else '✗'} "
+                  f"{source.name} — {last.message}")
             for warning in last.warnings:
                 log_cb(f"    ⚠ {warning}")
 
@@ -304,23 +306,21 @@ def convert_folder(
                                  encoding="utf-8")
             if log_cb:
                 log_cb(f"📖 Merged book written → {book_path}")
-            activity_log.write(f"MERGED BOOK written → {book_path} "
+            activity_log.write(f"📖 **Merged book:** `{book_path}` "
                                f"({book_path.stat().st_size / 1024:.0f} KB)")
         except OSError as exc:
             for r in results:
                 if r.output == book_path:
                     r.success = False
                     r.message = f"Could not write merged book: {exc}"
-            activity_log.write(f"MERGED BOOK FAILED: {exc}")
+            activity_log.write(f"❌ **Merged book failed:** {exc}")
 
     # session summary in the persistent log
     ok_count = sum(1 for r in results if r.success)
     warn_count = sum(len(r.warnings) for r in results)
     duration = (datetime.now(timezone.utc) - session_started).total_seconds()
-    activity_log.write(
-        f"SESSION END | {ok_count}/{len(results)} succeeded | "
-        f"{len(results) - ok_count} failed | {warn_count} warning(s) | "
-        f"{duration:.1f}s total")
+    activity_log.write_summary(ok_count, len(results), len(results) - ok_count,
+                               warn_count, duration)
 
     if progress_cb:
         progress_cb(len(results), total, Path(""))

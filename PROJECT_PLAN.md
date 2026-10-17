@@ -98,7 +98,7 @@ Markdown string + assets on disk → written to `output/<mirrored path>/<name>.m
 | M5 | DOCX/XLSX/image engines | `docx_engine.py`, `xlsx_engine.py`, `image_engine.py` | ✅ |
 | M6 | GUI | `gui.py` — card-based creative UI, folder picker, merge-mode switch, progress, log | ✅ |
 | M6+ | Merge mode | all files → one book .md with per-source dividers + shared assets (user request) | ✅ |
-| M6++ | Session reset + activity log | 🔄 New Conversion reset button; dated `logs/conversion_YYYY-MM-DD.log` with per-file timing/warnings/session summaries (user request) | ✅ |
+| M6++ | Session reset + activity log | 🔄 New Conversion reset button; dated `logs/conversion_YYYY-MM-DD.md` — a **Markdown log** with session headings, per-file result tables and summaries (user request) | ✅ |
 | M7 | AI enhancement | `ai_helper.py` — optional OpenAI/Gemini upgrades | ⏳ |
 | M8 | Docs & release | Full README, sample tests, push to GitHub | ⏳ |
 

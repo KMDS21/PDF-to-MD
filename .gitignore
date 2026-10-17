@@ -30,5 +30,8 @@ tests/output/
 tests/samples/out*/
 tests/samples/*_assets/
 
+# Persistent activity logs (markdown, generated at runtime)
+logs/
+
 # Logs
 *.log
